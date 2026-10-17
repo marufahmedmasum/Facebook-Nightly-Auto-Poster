@@ -1,0 +1,3001 @@
+{
+  "name": "Facebook Nightly Auto Poster (Drive Random + Telegram HITL)",
+  "nodes": [
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "searchMethod": "query",
+        "queryString": "'1MZTGI4QCOkRRTNRtP3dUUYZwaQ_FRFTR' in parents and mimeType contains 'image/' and trashed = false",
+        "returnAll": true,
+        "filter": {},
+        "options": {
+          "fields": [
+            "*"
+          ]
+        }
+      },
+      "id": "2b79e029-110a-4925-b01c-231b773ad2cb",
+      "name": "List Drive Images",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -368,
+        -1824
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "googleDriveOAuth2Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_DOCUMENTID",
+          "mode": "list",
+          "cachedResultName": "",
+          "cachedResultUrl": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 387028335,
+          "mode": "list",
+          "cachedResultName": "Post History",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_FILE_ID/edit#gid=387028335"
+        },
+        "options": {}
+      },
+      "id": "cfa6ecc4-0fa5-44e9-ae68-6340a1566ed2",
+      "name": "Read Post History",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        -176,
+        -1824
+      ],
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "googleSheetsOAuth2Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const images = $('List Drive Images').all().map(i => i.json).filter(x => x.id);\nconst history = $('Read Post History').all().map(i => i.json).filter(x => x.image_file_id);\nconst batchStateRows = $('Read Batch State').all().map(i => i.json).filter(x => x.date);\nconst todayStr = $now.toFormat('yyyy-LL-dd');\nconst todayLogPrefix = 'LOG-' + $now.toFormat('yyyyLLdd');\n\nconst todayScheduled = history.filter(h => String(h.log_id || '').startsWith(todayLogPrefix));\nconst countToday = todayScheduled.length;\nconst offsetsMin = [0, 60, 120, 180, 240];\n\nif (countToday >= offsetsMin.length) {\n  return [{ json: { done: true, noImages: false, needStartTime: false, countToday } }];\n}\nif (images.length === 0) {\n  return [{ json: { done: true, noImages: true, needStartTime: false, countToday } }];\n}\n\nconst usedTodayIds = new Set(todayScheduled.map(h => h.image_file_id));\nconst availableImages = images.filter(img => !usedTodayIds.has(img.id));\nif (availableImages.length === 0) {\n  return [{ json: { done: true, noImages: true, needStartTime: false, countToday } }];\n}\n\nconst nowUnix = Math.floor($now.toSeconds());\nconst todayBatchState = batchStateRows.find(r => r.date === todayStr);\n\nlet baseUnix;\nif (todayBatchState && todayBatchState.base_time_unix) {\n  baseUnix = Number(todayBatchState.base_time_unix);\n} else {\n  const defaultBase = $now.set({ hour: 20, minute: 00, second: 0, millisecond: 0 });\n  const defaultBaseUnix = Math.floor(defaultBase.toSeconds());\n  if (countToday === 0 && nowUnix > defaultBaseUnix - 300) {\n    return [{ json: { done: false, noImages: false, needStartTime: true, countToday } }];\n  }\n  baseUnix = defaultBaseUnix;\n}\n\nconst countMap = {};\nfor (const h of history) { countMap[h.image_file_id] = (countMap[h.image_file_id] || 0) + 1; }\nconst withCounts = availableImages.map(img => ({ file_id: img.id, file_name: img.name, web_view_link: img.webViewLink || '', times_posted: countMap[img.id] || 0 }));\nconst minCount = Math.min(...withCounts.map(i => i.times_posted));\nconst candidates = withCounts.filter(i => i.times_posted === minCount);\nconst chosen = candidates[Math.floor(Math.random() * candidates.length)];\n\nlet slotUnix = baseUnix + offsetsMin[countToday] * 60;\nif (slotUnix - nowUnix < 900) { slotUnix = nowUnix + 900; }\n\nreturn [{ json: { done: false, noImages: false, needStartTime: false, file_id: chosen.file_id, file_name: chosen.file_name, web_view_link: chosen.web_view_link, times_posted: chosen.times_posted, scheduled_unix: slotUnix, slot_index: countToday, countToday } }];"
+      },
+      "id": "6cdfa0b9-b515-42f1-aa53-6fae9d6e4abe",
+      "name": "Decide Next Action",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        -1824
+      ],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.done }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              },
+              "rightValue": true,
+              "id": "ec03fcc6-74ab-4aa2-9b60-4d60c22cce8b"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a96c7d28-bf64-413b-80ad-3118f129c408",
+      "name": "Batch Done For Tonight?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        400,
+        -1824
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "={{ $json.noImages ? '⚠️ Drive ফোল্ডারে ছবি নেই! Product ছবি আপলোড করুন।' : ('✅ আজ রাতের সবগুলো পোস্ট schedule হয়ে গেছে! মোট: ' + $json.countToday + 'টা') }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "372ce982-a7dc-4db0-a555-1eb45055736b",
+      "name": "Notify - Batch Done",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        624,
+        -1840
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "telegramApi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_DOCUMENTID",
+          "mode": "list",
+          "cachedResultName": "",
+          "cachedResultUrl": ""
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 2116462082,
+          "mode": "list",
+          "cachedResultName": "Pending Requests",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_FILE_ID/edit#gid=2116462082"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "status",
+              "lookupValue": "awaiting_description"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "5a3699f8-126e-4b9c-8d41-5d9e4e5d3718",
+      "name": "Read Pending Requests",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        640,
+        -1632
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "googleSheetsOAuth2Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.pending_id }}",
+              "operator": {
+                "type": "string",
+                "operation": "exists"
+              },
+              "rightValue": "",
+              "id": "4c40dff7-36a7-4e84-a048-80f63a507d0d"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "2fa9a76d-5eb7-4125-9fd8-b0a24f1de74c",
+      "name": "Already Awaiting A Reply?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        832,
+        -1632
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "=🔔 Reminder: আগের ছবিটার বিবরণ এখনো পাইনি!\n\n🖼️ {{ $json.image_name }}\n\nবিবরণ লিখে পাঠান, বাকি batch continue হবে।",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "b641f23a-f255-430b-97ed-4d79dd0e1a00",
+      "name": "Nudge - Reminder",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1056,
+        -1648
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "telegramApi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_DOCUMENTID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Pending Requests",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "pending_id": "={{ 'PEND-' + $now.toFormat('yyyyLLdd-HHmm') }}",
+            "image_file_id": "={{ $('Decide Next Action').item.json.file_id }}",
+            "image_name": "={{ $('Decide Next Action').item.json.file_name }}",
+            "requested_at": "={{ $now.toISO() }}",
+            "status": "awaiting_description",
+            "scheduled_unix": "={{ $('Decide Next Action').item.json.scheduled_unix }}",
+            "slot_index": "={{ $('Decide Next Action').item.json.slot_index }}",
+            "awaiting_start_time": "="
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "pending_id",
+              "displayName": "pending_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "image_file_id",
+              "displayName": "image_file_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "image_name",
+              "displayName": "image_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "requested_at",
+              "displayName": "requested_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "resolved_at",
+              "displayName": "resolved_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "scheduled_unix",
+              "displayName": "scheduled_unix",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "slot_index",
+              "displayName": "slot_index",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "description",
+              "displayName": "description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "awaiting_start_time",
+              "displayName": "awaiting_start_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "2415a8b8-baad-4142-af7d-b7bd2bfcf083",
+      "name": "Create Pending Request",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1280,
+        -1328
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "googleSheetsOAuth2Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendPhoto",
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "binaryData": true,
+        "additionalFields": {
+          "caption": "=🌙 ({{ $('Decide Next Action').item.json.slot_index }}/5) আজকের পোস্টের জন্য এই ছবিটা বেছে নিয়েছি:\n\n🖼️ {{ $('Decide Next Action').item.json.file_name }}\n🕐 Publish হবে: {{ DateTime.fromSeconds($('Decide Next Action').item.json.scheduled_unix).toFormat('hh:mm a') }}\n\nবিবরণ লিখে reply দিন (বাংলা/English/Banglish)।",
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "bb2f0c72-1814-4030-b0fc-3da7d4a7a60a",
+      "name": "Ask For Description",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1728,
+        -1328
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "telegramApi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message",
+          "callback_query"
+        ],
+        "additionalFields": {}
+      },
+      "id": "8d79b88f-df72-4eb1-9f85-850d43de0422",
+      "name": "Telegram Trigger - Description Handler",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -848,
+        -464
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "telegramApi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const msg = $json.message;\nconst text = msg.text || '';\nconst chatId = msg.chat.id;\n\nlet driveFileId = null;\nconst entities = msg.entities || [];\nlet rawUrl = null;\nfor (const entity of entities) {\n  if (entity.type === 'url') {\n    const candidate = text.substring(entity.offset, entity.offset + entity.length);\n    if (candidate.includes('drive.google.com')) { rawUrl = candidate; break; }\n  }\n  if (entity.type === 'text_link' && entity.url && entity.url.includes('drive.google.com')) { rawUrl = entity.url; break; }\n}\nif (!rawUrl) {\n  const m = text.match(/https:\\/\\/drive\\.google\\.com\\/[^\\s]+/);\n  if (m) rawUrl = m[0];\n}\nif (rawUrl) {\n  const idMatch = rawUrl.match(/[-\\w]{25,}/);\n  driveFileId = idMatch ? idMatch[0] : null;\n}\n\nreturn [{ json: { chatId, userText: text, hasLink: !!driveFileId, extractedFileId: driveFileId } }];"
+      },
+      "id": "dcc5ed3f-9f2e-4c72-b890-0acf7274c1e8",
+      "name": "Parse Telegram Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        -624
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.hasLink }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              },
+              "rightValue": true,
+              "id": "8fdbce32-f948-406c-bfb2-d0748633aeed"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c57b91cc-a8ac-4fcb-814d-9e0d2f33f848",
+      "name": "Message Has Drive Link?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -96,
+        -624
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.extractedFileId }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "1cb05b25-f195-4563-9689-028bfd0c10d9",
+      "name": "Lookup Image (Repost)",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        976,
+        -1152
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "googleDriveOAuth2Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const nowUnix = Math.floor(Date.now() / 1000);\n\nconst minimumScheduleUnix = nowUnix + 900; // 15 minutes later\nconst maximumScheduleUnix = nowUnix + (75 * 24 * 60 * 60);\n\nfunction getSafeScheduledUnix(value) {\n  const requestedUnix = Number(value);\n\n  if (\n    Number.isFinite(requestedUnix) &&\n    requestedUnix >= minimumScheduleUnix &&\n    requestedUnix <= maximumScheduleUnix\n  ) {\n    return Math.floor(requestedUnix);\n  }\n\n  return minimumScheduleUnix;\n}\n\n\n// =========================\n// RETRY FLOW\n// =========================\n\nif ($input.item.json.retry === true) {\n\n  const r = $input.item.json;\n\n  return [{\n    json: {\n      file_id: r.file_id,\n      file_name: r.file_name,\n      description: r.description,\n      chatId: r.chatId,\n      scheduled_unix: getSafeScheduledUnix(r.scheduled_unix),\n      mode: r.mode\n    }\n  }];\n}\n\n\n// =========================\n// NORMAL / REPOST FLOW\n// =========================\n\nconst fileId =\n  $input.item.json.id ||\n  $input.item.json.image_file_id;\n\nconst fileName =\n  $input.item.json.name ||\n  $input.item.json.image_name;\n\nconst isPendingReply =\n  $input.item.json.image_file_id !== undefined;\n\nconst mode = isPendingReply ? 'reply' : 'repost';\n\nconst scheduledUnixFromPending =\n  $input.item.json.scheduled_unix;\n\nconst ctx = $('Parse Telegram Message').item.json;\n\n\n// =========================\n// OUTPUT\n// =========================\n\nreturn [{\n  json: {\n    file_id: fileId,\n    file_name: fileName,\n\n    description:\n      $input.item.json.description ||\n      ctx.description ||\n      '',\n\n    chatId:\n      $input.item.json.chatId ||\n      ctx.chatId,\n\n    scheduled_unix: getSafeScheduledUnix(\n      scheduledUnixFromPending ||\n      ctx.scheduled_unix\n    ),\n\n    mode: mode\n  }\n}];"
+      },
+      "id": "3bd2ad24-29bd-448e-a64f-21fd546cb384",
+      "name": "Normalize Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2256,
+        -432
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_DOCUMENTID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 2116462082,
+          "mode": "list",
+          "cachedResultName": "Pending Requests",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/YOUR_FILE_ID/edit#gid=2116462082"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "status",
+              "lookupValue": "awaiting_description"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "f817acf6-1754-4b9b-82c6-ead1756c4b28",
+      "name": "Read Unresolved Pending",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        48,
+        -384
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "googleSheetsOAuth2Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.pending_id }}",
+              "operator": {
+                "type": "string",
+                "operation": "exists"
+              },
+              "rightValue": "",
+              "id": "0da658a5-f1b8-4464-ac50-9634f31da9ac"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a0dd7d42-137d-4468-9505-e6d12a48deb2",
+      "name": "Found Pending Row?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        272,
+        -384
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "c70a3ebb-c1f4-47ff-8916-378c4fc6bdf1",
+      "name": "Take First Pending",
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        496,
+        -480
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_DOCUMENTID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Pending Requests",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "row_number": 0,
+            "pending_id": "={{ $json.pending_id }}",
+            "image_file_id": "={{ $json.image_file_id }}",
+            "image_name": "={{ $json.image_name }}",
+            "resolved_at": "={{ $now.toISO() }}",
+            "scheduled_unix": "={{ $json.scheduled_unix }}",
+            "status": "resolved"
+          },
+          "matchingColumns": [
+            "pending_id"
+          ],
+          "schema": [
+            {
+              "id": "pending_id",
+              "displayName": "pending_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "image_file_id",
+              "displayName": "image_file_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "image_name",
+              "displayName": "image_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "requested_at",
+              "displayName": "requested_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "resolved_at",
+              "displayName": "resolved_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "scheduled_unix",
+              "displayName": "scheduled_unix",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "slot_index",
+              "displayName": "slot_index",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "description",
+              "displayName": "description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "awaiting_start_time",
+              "displayName": "awaiting_start_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "41f2dd50-61c2-446b-97ed-ee497b4b026c",
+      "name": "Mark Pending Resolved",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2176,
+        144
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "googleSheetsOAuth2Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "❓ এখন কোনো pending post নেই এবং আপনার message-এ কোনো Google Drive image link ও পাইনি।\n\nহয় রাতের batch-এর জন্য অপেক্ষা করুন, অথবা কোনো ছবির Drive link + বিবরণ পাঠান।",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "c26e3e0f-5d3c-4a02-8fa2-9ff736efde4d",
+      "name": "Send Help - No Pending",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        496,
+        -224
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "telegramApi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.file_id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "963abb5a-a507-41e2-8c29-441c37b175ac",
+      "name": "Download Image (Vision)",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        2416,
+        -800
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "googleDriveOAuth2Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const binaryBuffer = await this.helpers.getBinaryDataBuffer(0, 'data');\nconst base64Image = binaryBuffer.toString('base64');\nconst mimeType = ($input.item.binary && $input.item.binary.data && $input.item.binary.data.mimeType) || 'image/jpeg';\nconst ctx = $('Normalize Request').item.json;\n\nreturn [{ json: { file_id: ctx.file_id, file_name: ctx.file_name, description: ctx.description, chatId: ctx.chatId, base64Image, mimeType } }];"
+      },
+      "id": "a4057a84-4e7c-4552-9698-dd21182b8998",
+      "name": "Convert Image To Base64",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2688,
+        -800
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  contents: [\n    {\n      role: \"user\",\n      parts: [\n        {\n          text: \"তুমি বাংলাদেশি ই-কমার্স পেজ 'Your Shop'-এর জন্য প্রফেশনাল কপিরাইটার। তোমার কাজ হলো পণ্যের ছবি ও বিবরণ দেখে পেজের হুবহু পরিচিত ফরম্যাটে একটি রেডি-টু-পোস্ট ফেসবুক ক্যাপশন তৈরি করা।\\n\\nক্যাপশনের নির্দিষ্ট লাইন-বাই-লাইন স্ট্রাকচার:\\n1. লাইন ১: আকর্ষণীয় হুক বা প্রোডাক্ট টাইটেল (উপযুক্ত ইমোজি সহ)।\\n2. লাইন ২-৩: প্রোডাক্টের আসল সুবিধা বা সমস্যার সমাধান নিয়ে ২ লাইনের ক্যাচি বর্ণনা (বাংলা ও বাংলিশ মিশ্রিত সহজ ভাষা)।\\n3. ফিচার লিস্ট: 'Why You'll Love It:' অথবা সরাসরি ৫-৭টি প্রধান ফিচার বুলেট আকারে দাও (প্রতিটি ফিচারের শুরুতে '✅' বা প্রাসঙ্গিক ইমোজি থাকবে এবং প্রতিটি ফিচারের শেষে স্পষ্ট নতুন লাইন থাকবে)।\\n4. বিবরণে যদি দাম উল্লেখ থাকে, তা ফিচারের নিচে সুন্দরভাবে উল্লেখ করো (যেমন: '💰 মাত্র ৯৫০ টাকা')। দাম না থাকলে বানিয়ে দেওয়ার দরকার নেই।\\n5. ডেলিভারি ও অর্ডার:\\n   🚚 সারা বাংলাদেশে Home Delivery Available\\n   📩 অর্ডার করতে Your Shop-এর Inbox করুন।\\n6. ব্র্যান্ড সিগনেচার:\\n   🐼 Your Shop\\n   Everything You Love, Your Shop\\n\\nহ্যাশট্যাগ:\\n১০-১৫টি প্রাসঙ্গিক হ্যাশট্যাগ দাও (#YourShop #YourShopBD #OnlineShoppingBD এবং প্রোডাক্টের নাম/ক্যাটাগরি ভিত্তিক)।\\n\\nফরম্যাটিং নিয়ম:\\n- প্রতিটি সেকশন ও লাইনের মাঝে যথাযথ লাইন ব্রেক (\\\\n) নিশ্চিত করো।\\n- কোনো ভূমিকা, অতিরিক্ত কথা বা ব্যাকটিক ছাড়া শুধু নিচের ভ্যালিড JSON ফরম্যাটে উত্তর দাও:\\n{\\\"caption\\\": \\\"...\\\", \\\"hashtags\\\": \\\"#YourShop #YourShopBD ...\\\"}\\n\\nপণ্যের বিবরণ: \" + $json.description\n        },\n        {\n          inline_data: {\n            mime_type: $json.mimeType,\n            data: $json.base64Image\n          }\n        }\n      ]\n    }\n  ],\n  tools: [\n    { google_search: {} }\n  ],\n  generationConfig: {\n    temperature: 0.7,\n    maxOutputTokens: 4096\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "0b92939f-29b6-48f4-acde-1e6184aa3c48",
+      "name": "Generate Caption (Gemini)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2944,
+        -800
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "httpHeaderAuth account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $json;\nconst candidate = response.candidates?.[0];\nconst rawContent = candidate?.content?.parts?.[0]?.text || '';\nconst cleaned = String(rawContent).trim().replace(/^```(json)?/i, '').replace(/```$/, '').trim();\n\nlet captionData;\ntry {\n  captionData = JSON.parse(cleaned);\n  if (!captionData.caption || !captionData.hashtags) throw new Error('missing fields');\n} catch (e) {\n  captionData = {\n    caption: 'নতুন পণ্য এসেছে! এখনই দেখুন।',\n    hashtags: '#newarrival #shopping',\n    _debug_error: e.message,\n    _debug_raw: rawContent\n  };\n}\n\n// লিটারাল \\n এবং \\r থাকলে সেগুলোকে আসল নিউলাইনে কনভার্ট করা\nconst formatNewlines = (str) => {\n  if (typeof str !== 'string') return '';\n  return str.replace(/\\\\r\\\\n/g, '\\n').replace(/\\\\n/g, '\\n').replace(/\\\\r/g, '\\n');\n};\n\nconst cleanCaption = formatNewlines(captionData.caption);\nconst cleanHashtags = formatNewlines(captionData.hashtags);\n\nconst ctx = $('Normalize Request').item.json;\nconst finalMessage = cleanCaption + '\\n\\n' + cleanHashtags;\n\nreturn {\n  ...ctx,\n  caption: cleanCaption,\n  hashtags: cleanHashtags,\n  finalMessage\n};"
+      },
+      "id": "0a794ff2-1ed2-4620-bfe8-6aad1e832959",
+      "name": "Parse Caption & Hashtags",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3200,
+        -928
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.file_id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "044b7d9a-b3ed-4b98-b9e8-2921d1b2021a",
+      "name": "Download Image (For Posting)",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        3392,
+        -928
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "googleDriveOAuth2Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v21.0/YOUR_PAGE_ID/photos",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "published",
+              "value": "false"
+            },
+            {
+              "parameterType": "formBinaryData",
+              "name": "source",
+              "inputDataFieldName": "data"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e8da45bb-74ea-41ce-9aaf-d1e30180ff98",
+      "name": "Upload Unpublished Photo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3616,
+        -928
+      ],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "httpQueryAuth account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v21.0/YOUR_PAGE_ID/feed",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "message",
+              "value": "={{ $('Parse Caption & Hashtags').item.json.finalMessage }}"
+            },
+            {
+              "name": "published",
+              "value": "false"
+            },
+            {
+              "name": "scheduled_publish_time",
+              "value": "={{ $('Normalize Request').item.json.scheduled_unix }}"
+            },
+            {
+              "name": "attached_media",
+              "value": "={{ JSON.stringify([{ media_fbid: $json.id }]) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "99120b55-a19a-42bc-bdd1-ce830b42abd3",
+      "name": "Create Scheduled Feed Post",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3856,
+        -1072
+      ],
+      "credentials": {
+        "httpQueryAuth": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "httpQueryAuth account"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_DOCUMENTID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Post History",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "log_id": "={{ 'LOG-' + $now.toFormat('yyyyLLdd-HHmmss') }}",
+            "image_file_id": "={{ $('Parse Caption & Hashtags').item.json.file_id }}",
+            "image_name": "={{ $('Parse Caption & Hashtags').item.json.file_name }}",
+            "description_used": "={{ $('Parse Caption & Hashtags').item.json.description }}",
+            "caption": "={{ $('Parse Caption & Hashtags').item.json.caption }}",
+            "hashtags": "={{ $('Parse Caption & Hashtags').item.json.hashtags }}",
+            "fb_post_id": "={{ $json.id }}",
+            "scheduled_for": "={{ DateTime.fromSeconds(Number($('Normalize Request').item.json.scheduled_unix)).toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "log_id",
+              "displayName": "log_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "image_file_id",
+              "displayName": "image_file_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "image_name",
+              "displayName": "image_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "description_used",
+              "displayName": "description_used",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "caption",
+              "displayName": "caption",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "hashtags",
+              "displayName": "hashtags",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "fb_post_id",
+              "displayName": "fb_post_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "posted_at",
+              "displayName": "posted_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "scheduled_for",
+              "displayName": "scheduled_for",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "29b1a1f5-6580-40f9-b3c5-34d6d085483c",
+      "name": "Log To Post History",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        4080,
+        -1088
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "googleSheetsOAuth2Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Normalize Request').item.json.chatId }}",
+        "text": "=✅ Schedule হয়ে গেছে!\n\n🖼️ {{ $('Parse Caption & Hashtags').item.json.file_name }}\n📝 {{ $('Parse Caption & Hashtags').item.json.caption }}\n🕐 Publish হবে: {{ DateTime.fromSeconds($('Normalize Request').item.json.scheduled_unix).toFormat('dd LLL, hh:mm a') }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "id": "ba59eb0f-40ff-4e8c-baa3-f647e7322098",
+      "name": "Notify - Scheduled Success",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        4304,
+        -1088
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "telegramApi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $('Normalize Request').item.json.mode }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "reply",
+              "id": "c5287097-44dc-44f9-97ae-69716111ac68"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "dbafbbe8-7b5f-4523-9c88-32f34230b703",
+      "name": "Continue Batch?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4576,
+        -1088
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "7015a669-293c-442a-8763-0e1146e7f11e",
+      "name": "Ad-hoc Repost Done",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        4848,
+        -1072
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Normalize Request').item.json.chatId }}",
+        "text": "=❌ Facebook schedule FAILED!\n\n🖼️ {{ $('Normalize Request').item.json.file_name }}\n\nএই ছবির Drive link আবার পাঠিয়ে চেষ্টা করুন, অথবা n8n execution log চেক করুন।",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "521cea29-2ab8-440b-b3bb-af006c8f05c1",
+      "name": "Notify - Schedule Failed",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -880,
+        1616
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "telegramApi account"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $('Decide Next Action').item.json.file_id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "a0e43156-3dbe-4ffa-ad7f-8b43588d537b",
+      "name": "Download Image (For Telegram)",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1520,
+        -1328
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "googleDriveOAuth2Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.callback_query }}",
+              "operator": {
+                "operation": "exists",
+                "type": "string"
+              },
+              "rightValue": "",
+              "id": "eff207a2-eb95-477c-9f31-f3faf0a0223f"
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "bc890822-bb66-4ccc-a098-35fb0415b804",
+      "name": "Is Callback Query?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -624,
+        -464
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const cq = $json.callback_query;\nconst data = cq.data || '';\nconst retryId = data.startsWith('retry:') ? data.slice(6) : '';\nconst chatId = (cq.message && cq.message.chat) ? cq.message.chat.id : (cq.from ? cq.from.id : '');\nreturn [{ json: { retry_id: retryId, chatId, callback_query_id: cq.id } }];"
+      },
+      "id": "4dab56c8-c068-49e3-b98e-7ae8c64e131d",
+      "name": "Parse Retry Callback",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        -288
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "callback",
+        "queryId": "={{ $('Parse Retry Callback').item.json.callback_query_id }}",
+        "additionalFields": {
+          "text": "রিট্রাই শুরু হচ্ছে..."
+        }
+      },
+      "id": "5684500d-ff83-4d21-bbf3-590564a87ddc",
+      "name": "Answer Callback Query",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -144,
+        96
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "telegramApi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "leftValue": "={{ $json.retry_id }}",
+              "operator": {
+                "operation": "exists",
+                "type": "string"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          }
+        },
+        "options": {}
+      },
+      "id": "f891ec4e-554b-45cc-b82d-936504852079",
+      "name": "Found Failed Request?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        304,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = $json;\nreturn [{ json: { file_id: row.file_id, file_name: row.file_name, description: row.description, chatId: row.chatId, scheduled_unix: Number(row.scheduled_unix), mode: row.mode, retry: true } }];"
+      },
+      "id": "28cc8c0e-7004-46a3-8b84-45c624504d37",
+      "name": "Prepare Retry Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        576,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "⚠️ এই retry বাটনটা আর valid না (data পাওয়া যায়নি)। নতুন করে ছবির Drive link পাঠান।",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "3da61d2b-4c05-42e0-be3b-40c912f2966d",
+      "name": "Notify - Retry Expired",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        464,
+        272
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "telegramApi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_DOCUMENTID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Failed Requests",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "retry_id": "={{ 'R' + $now.toFormat('HHmmss') + Math.random().toString(36).slice(2,6) }}",
+            "file_id": "={{ $('Normalize Request').item.json.file_id }}",
+            "file_name": "={{ $('Normalize Request').item.json.file_name }}",
+            "description": "={{ $('Normalize Request').item.json.description }}",
+            "chatId": "={{ $('Normalize Request').item.json.chatId }}",
+            "scheduled_unix": "={{ $('Normalize Request').item.json.scheduled_unix }}",
+            "mode": "={{ $('Normalize Request').item.json.mode }}",
+            "error_reason": "={{ JSON.stringify($json).slice(0, 300) }}",
+            "status": "pending_retry"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "retry_id",
+              "displayName": "retry_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "file_id",
+              "displayName": "file_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "file_name",
+              "displayName": "file_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "description",
+              "displayName": "description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "chatId",
+              "displayName": "chatId",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "scheduled_unix",
+              "displayName": "scheduled_unix",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "mode",
+              "displayName": "mode",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "error_reason",
+              "displayName": "error_reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "5edc628a-43dc-4083-93b5-8ffc5265ffbd",
+      "name": "Save Failed Request",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        3888,
+        -784
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "googleSheetsOAuth2Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "=⚠️ Post তৈরিতে সমস্যা হয়েছে (সাময়িক service error)।\n\n🖼️ {{ $('Normalize Request').item.json.file_name }}\n\nনিচের বাটনে চাপলে আবার চেষ্টা করা হবে।",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "🔁 আবার চেষ্টা করো",
+                    "additionalFields": {
+                      "callback_data": "={{ 'retry:' + $json.retry_id }}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "8a8b62cf-714e-4ac3-8bac-3108e76a66ac",
+      "name": "Notify - Retry Needed",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        4096,
+        -784
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "telegramApi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_DOCUMENTID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Batch State",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "d859a1fe-f819-49fe-bd7e-9d490874834a",
+      "name": "Read Batch State",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        16,
+        -1824
+      ],
+      "alwaysOutputData": true,
+      "executeOnce": true,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "googleSheetsOAuth2Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $('Decide Next Action').item.json.needStartTime }}",
+              "operator": {
+                "operation": "equals",
+                "type": "boolean"
+              },
+              "rightValue": true,
+              "id": "d591cb67-5e50-46df-b92d-0a0de6f992e1"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "19399065-ceb4-416a-bcce-5e4801325571",
+      "name": "Need Start Time?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1072,
+        -1440
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_DOCUMENTID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Pending Requests",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "pending_id": "={{ 'PEND-' + $now.toFormat('yyyyLLdd-HHmm') }}",
+            "requested_at": "={{ $now.toISO() }}",
+            "status": "awaiting_description"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "pending_id",
+              "displayName": "pending_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "image_file_id",
+              "displayName": "image_file_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "image_name",
+              "displayName": "image_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "requested_at",
+              "displayName": "requested_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "resolved_at",
+              "displayName": "resolved_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "scheduled_unix",
+              "displayName": "scheduled_unix",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "slot_index",
+              "displayName": "slot_index",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "description",
+              "displayName": "description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "awaiting_start_time",
+              "displayName": "awaiting_start_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "460a11de-0147-4059-ad8a-09dcc0835bca",
+      "name": "Create Start Time Pending",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1280,
+        -1520
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "googleSheetsOAuth2Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "🌙 রাত 08 টা পার হয়ে গেছে, আজকের batch এখনো শুরু হয়নি!\n\nআজ রাতে কয়টা থেকে post শুরু করব? সময় লিখে জানান (যেমন: 9:30, 9:30 PM, বা 21:30)। এখান থেকেই আজকের বাকি ৫টা post-এর সময় হিসেব হবে (১ ঘণ্টা spacing-এ)।",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "be64cbce-c32d-422c-b7be-193d55125c9e",
+      "name": "Ask For Start Time",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1504,
+        -1520
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "telegramApi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ !$json.image_file_id }}",
+              "operator": {
+                "operation": "equals",
+                "type": "boolean"
+              },
+              "rightValue": true,
+              "id": "93ceeb29-e043-47ad-b262-b7f9544e0ba6"
+            },
+            {
+              "leftValue": "={{ String($json.awaiting_start_time) }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "true",
+              "id": "ed3a26c8-0560-4b11-a9dc-63d71b8908d2"
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "5ff550ff-0413-409b-a345-44bb35459ced",
+      "name": "Is Start Time Request?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        -480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const pendingRow = $json;\nconst ctx = $('Parse Telegram Message').item.json;\nconst text = (ctx.userText || '').trim().toLowerCase();\n\nlet match = text.match(/(\\d{1,2})(?:[:.](\\d{2}))?\\s*(am|pm)?/);\nlet baseUnix = null;\nlet parseFailed = true;\n\nif (match && match[1] !== undefined) {\n  let hour = parseInt(match[1], 10);\n  let minute = match[2] ? parseInt(match[2], 10) : 0;\n  const ampm = match[3];\n  if (!isNaN(hour) && hour >= 0 && hour <= 23 && minute >= 0 && minute < 60) {\n    if (hour <= 12) {\n      if (ampm === 'am') { if (hour === 12) hour = 0; }\n      else { if (hour !== 12) hour += 12; }\n    }\n    const dt = $now.set({ hour: hour % 24, minute, second: 0, millisecond: 0 });\n    baseUnix = Math.floor(dt.toSeconds());\n    parseFailed = false;\n  }\n}\n\nconst nowUnix = Math.floor($now.toSeconds());\nif (parseFailed || baseUnix === null) {\n  baseUnix = nowUnix + 900;\n  parseFailed = true;\n} else if (baseUnix < nowUnix - 300) {\n  baseUnix = nowUnix + 900;\n}\n\nreturn [{ json: { pending_id: pendingRow.pending_id, base_time_unix: baseUnix, chatId: ctx.chatId, parseFailed, image_file_id: pendingRow.image_file_id || '', image_name: pendingRow.image_name || '', description: pendingRow.description || '' } }];"
+      },
+      "id": "7e5c55aa-e719-4e5f-80fe-bee9c595ea9a",
+      "name": "Parse Start Time",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        -624
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_DOCUMENTID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Batch State",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ $now.toFormat('yyyy-LL-dd') }}",
+            "base_time_unix": "={{ $json.base_time_unix }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "base_time_unix",
+              "displayName": "base_time_unix",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "8532f175-8f17-49d8-9972-0c541d811da3",
+      "name": "Save Batch Start Time",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1104,
+        -624
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "googleSheetsOAuth2Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_DOCUMENTID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Pending Requests",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "pending_id": "={{ $('Parse Start Time').item.json.pending_id }}",
+            "resolved_at": "={{ $now.toISO() }}",
+            "status": "resolved"
+          },
+          "matchingColumns": [
+            "pending_id"
+          ],
+          "schema": [
+            {
+              "id": "pending_id",
+              "displayName": "pending_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "image_file_id",
+              "displayName": "image_file_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "image_name",
+              "displayName": "image_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "requested_at",
+              "displayName": "requested_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "resolved_at",
+              "displayName": "resolved_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "scheduled_unix",
+              "displayName": "scheduled_unix",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "slot_index",
+              "displayName": "slot_index",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "description",
+              "displayName": "description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "awaiting_start_time",
+              "displayName": "awaiting_start_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "c82f14ec-866f-44f3-9c51-e441422c11e5",
+      "name": "Mark Start Time Pending Resolved",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1328,
+        -624
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "googleSheetsOAuth2Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Parse Start Time').item.json.chatId }}",
+        "text": "={{ $('Parse Start Time').item.json.parseFailed ? '⚠️ সময়টা বুঝতে পারিনি, তাই এখন থেকে প্রায় ১৫ মিনিট পর প্রথম post schedule হবে। ভবিষ্যতে HH:MM ফরম্যাটে লিখবেন (যেমন 9:30)।' : ('✅ ঠিক আছে! রাত ' + DateTime.fromSeconds($('Parse Start Time').item.json.base_time_unix).toFormat('hh:mm a') + ' থেকে আজকের post schedule শুরু হবে।') }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "9987aff1-7023-4c71-b76b-8ce6776c0b85",
+      "name": "Notify - Start Time Confirmed",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        4320,
+        -624
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "telegramApi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ String($json.slot_index) }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "0",
+              "id": "dab7f73c-02e8-405b-a42e-aaf28a1c558d"
+            },
+            {
+              "leftValue": "={{ $now.toSeconds() >= $now.set({ hour: 20, minute: 00, second: 0, millisecond: 0 }).toSeconds() }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              },
+              "rightValue": true,
+              "id": "e46f090b-d456-4452-a314-b3d815c09f43"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b8ea1d50-066f-4ab5-9d5a-86581f454cfc",
+      "name": "Is Late Reply (First Post, After 8PM)?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1264,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_DOCUMENTID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Pending Requests",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "pending_id": "={{ $json.pending_id }}",
+            "description": "={{ $('Parse Telegram Message').item.json.userText }}",
+            "awaiting_start_time": "true"
+          },
+          "matchingColumns": [
+            "pending_id"
+          ],
+          "schema": [
+            {
+              "id": "pending_id",
+              "displayName": "pending_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "image_file_id",
+              "displayName": "image_file_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "image_name",
+              "displayName": "image_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "requested_at",
+              "displayName": "requested_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "resolved_at",
+              "displayName": "resolved_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "scheduled_unix",
+              "displayName": "scheduled_unix",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "slot_index",
+              "displayName": "slot_index",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "description",
+              "displayName": "description",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "awaiting_start_time",
+              "displayName": "awaiting_start_time",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "aa78dbaa-0809-44fb-b03c-5b1554a70d72",
+      "name": "Save Late Description & Flag",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1568,
+        -32
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "googleSheetsOAuth2Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "=🌙 রাত 08টা পার হয়ে গেছে! আপনার বিবরণ save করে রেখেছি:\n\n📝 {{ $('Parse Telegram Message').item.json.userText }}\n\nআজ রাতে কয়টা থেকে post শুরু করব? সময় লিখে জানান (যেমন: 9:30, 9:30 PM, বা 21:30)। এই সময় থেকেই বাকি post-গুলোরও সময় হিসেব হবে।",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "3e59ce40-a06e-43e8-9d37-440c0b33d084",
+      "name": "Ask For Start Time (Late Reply)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1776,
+        -48
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "telegramApi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $('Parse Start Time').item.json.image_file_id }}",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              },
+              "rightValue": "",
+              "id": "fe92dcb9-7e54-4f7b-8f22-326209b13003"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d839ab33-0978-4169-bf0c-2ec1c45304fe",
+      "name": "Was Late-Description Reply?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1552,
+        -624
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Parse Start Time').item.json.chatId }}",
+        "text": "={{ $('Parse Start Time').item.json.parseFailed ? '⚠️ সময়টা বুঝতে পারিনি, তাই এখন থেকে প্রায় ১৫ মিনিট পর post schedule হবে। আপনার আগে দেওয়া বিবরণ দিয়েই post হবে।' : ('✅ ঠিক আছে! রাত ' + DateTime.fromSeconds($('Parse Start Time').item.json.base_time_unix).toFormat('hh:mm a') + ' থেকে আপনার আগে দেওয়া বিবরণ দিয়ে post schedule হবে।') }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "f57affea-2260-44ea-b7a0-d638fb321a40",
+      "name": "Notify - Late Post Scheduling",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1840,
+        -720
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "telegramApi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const p = $('Parse Start Time').item.json;\nreturn [{ json: {\n  retry: true,\n  file_id: p.image_file_id,\n  file_name: p.image_name,\n  description: p.description,\n  chatId: p.chatId,\n  scheduled_unix: p.base_time_unix,\n  mode: 'reply'\n} }];"
+      },
+      "id": "6dc754ee-4e83-4286-b2b4-cd99f5b8a406",
+      "name": "Resume Late Post",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2064,
+        -720
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "10 00 * * *"
+            }
+          ]
+        }
+      },
+      "id": "10c426f9-7432-432e-8436-5f0225cece08",
+      "name": "Start Monrning Batch (12:05 Am)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -720,
+        -1824
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_DOCUMENTID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Failed Requests",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "retry_id",
+              "lookupValue": "={{ $('Parse Retry Callback').item.json.retry_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "dba09b9a-1e90-4ba7-957e-169773e02743",
+      "name": "Lookup Failed Request",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        80,
+        96
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_CREDENTIAL_ID",
+          "name": "googleSheetsOAuth2Api account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "List Drive Images": {
+      "main": [
+        [
+          {
+            "node": "Read Post History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide Next Action": {
+      "main": [
+        [
+          {
+            "node": "Batch Done For Tonight?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batch Done For Tonight?": {
+      "main": [
+        [
+          {
+            "node": "Notify - Batch Done",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read Pending Requests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Pending Requests": {
+      "main": [
+        [
+          {
+            "node": "Already Awaiting A Reply?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Already Awaiting A Reply?": {
+      "main": [
+        [
+          {
+            "node": "Nudge - Reminder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Need Start Time?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Telegram Message": {
+      "main": [
+        [
+          {
+            "node": "Message Has Drive Link?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message Has Drive Link?": {
+      "main": [
+        [
+          {
+            "node": "Lookup Image (Repost)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Read Unresolved Pending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Image (Repost)": {
+      "main": [
+        [
+          {
+            "node": "Normalize Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Request": {
+      "main": [
+        [
+          {
+            "node": "Download Image (Vision)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Unresolved Pending": {
+      "main": [
+        [
+          {
+            "node": "Found Pending Row?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Found Pending Row?": {
+      "main": [
+        [
+          {
+            "node": "Take First Pending",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Help - No Pending",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Pending Resolved": {
+      "main": [
+        [
+          {
+            "node": "Normalize Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Image (Vision)": {
+      "main": [
+        [
+          {
+            "node": "Convert Image To Base64",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Caption (Gemini)": {
+      "main": [
+        [
+          {
+            "node": "Parse Caption & Hashtags",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save Failed Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Caption & Hashtags": {
+      "main": [
+        [
+          {
+            "node": "Download Image (For Posting)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Image (For Posting)": {
+      "main": [
+        [
+          {
+            "node": "Upload Unpublished Photo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Unpublished Photo": {
+      "main": [
+        [
+          {
+            "node": "Create Scheduled Feed Post",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save Failed Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Scheduled Feed Post": {
+      "main": [
+        [
+          {
+            "node": "Log To Post History",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save Failed Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log To Post History": {
+      "main": [
+        [
+          {
+            "node": "Notify - Scheduled Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify - Scheduled Success": {
+      "main": [
+        [
+          {
+            "node": "Continue Batch?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Continue Batch?": {
+      "main": [
+        [
+          {
+            "node": "List Drive Images",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ad-hoc Repost Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Pending Request": {
+      "main": [
+        [
+          {
+            "node": "Download Image (For Telegram)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Image (For Telegram)": {
+      "main": [
+        [
+          {
+            "node": "Ask For Description",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert Image To Base64": {
+      "main": [
+        [
+          {
+            "node": "Generate Caption (Gemini)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Trigger - Description Handler": {
+      "main": [
+        [
+          {
+            "node": "Is Callback Query?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Callback Query?": {
+      "main": [
+        [
+          {
+            "node": "Parse Retry Callback",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Parse Telegram Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Retry Callback": {
+      "main": [
+        [
+          {
+            "node": "Answer Callback Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Answer Callback Query": {
+      "main": [
+        [
+          {
+            "node": "Lookup Failed Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Found Failed Request?": {
+      "main": [
+        [
+          {
+            "node": "Prepare Retry Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify - Retry Expired",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Retry Data": {
+      "main": [
+        [
+          {
+            "node": "Normalize Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Failed Request": {
+      "main": [
+        [
+          {
+            "node": "Notify - Retry Needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Post History": {
+      "main": [
+        [
+          {
+            "node": "Read Batch State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Batch State": {
+      "main": [
+        [
+          {
+            "node": "Decide Next Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Need Start Time?": {
+      "main": [
+        [
+          {
+            "node": "Create Start Time Pending",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Pending Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Start Time Pending": {
+      "main": [
+        [
+          {
+            "node": "Ask For Start Time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Take First Pending": {
+      "main": [
+        [
+          {
+            "node": "Is Start Time Request?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Start Time Request?": {
+      "main": [
+        [
+          {
+            "node": "Parse Start Time",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Is Late Reply (First Post, After 8PM)?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Start Time": {
+      "main": [
+        [
+          {
+            "node": "Save Batch Start Time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Batch Start Time": {
+      "main": [
+        [
+          {
+            "node": "Mark Start Time Pending Resolved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Start Time Pending Resolved": {
+      "main": [
+        [
+          {
+            "node": "Was Late-Description Reply?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify - Start Time Confirmed": {
+      "main": [
+        [
+          {
+            "node": "List Drive Images",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Late Reply (First Post, After 8PM)?": {
+      "main": [
+        [
+          {
+            "node": "Save Late Description & Flag",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark Pending Resolved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Late Description & Flag": {
+      "main": [
+        [
+          {
+            "node": "Ask For Start Time (Late Reply)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Was Late-Description Reply?": {
+      "main": [
+        [
+          {
+            "node": "Notify - Late Post Scheduling",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify - Start Time Confirmed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Notify - Late Post Scheduling": {
+      "main": [
+        [
+          {
+            "node": "Resume Late Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resume Late Post": {
+      "main": [
+        [
+          {
+            "node": "Normalize Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start Monrning Batch (12:05 Am)": {
+      "main": [
+        [
+          {
+            "node": "List Drive Images",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Failed Request": {
+      "main": [
+        [
+          {
+            "node": "Found Failed Request?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true,
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "d3d414bf-841a-4a00-98de-ee74cbc9f1e9",
+  "meta": {},
+  "nodeGroups": [],
+  "id": "5DMG1ObUecGeP0fc",
+  "tags": []
+}
