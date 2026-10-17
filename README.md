@@ -5,7 +5,7 @@ An n8n workflow that turns a Google Drive folder of product photos into **five s
 **Stack:** n8n · Telegram Bot · Google Drive · Gemini 2.5 Flash (vision) · Facebook Graph API v21 · Google Sheets
 **Size:** 58 nodes · runs unattended after the owner's Telegram replies
 
-![Workflow overview](screenshots/workflow-overview.png)
+![Workflow overview](workflow-overview.png)
 
 ## How it works
 
